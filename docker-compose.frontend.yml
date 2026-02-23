@@ -1,0 +1,32 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SpaceForge — Frontend stack (portable / independently deployable)
+#
+# IMPORTANT: Copy .env.example → .env before running.
+# VITE_BACKEND_URL (= BACKEND_PUBLIC_URL) is baked into the JS bundle at build
+# time. Changing it requires a rebuild.
+#
+# Standalone (backend already running):
+#   docker compose -f docker-compose.frontend.yml up --build
+#
+# Together with backend:
+#   docker compose -f docker-compose.yml -f docker-compose.frontend.yml up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the JS bundle. Reads from .env via compose variable interpolation.
+        VITE_BACKEND_URL: ${BACKEND_PUBLIC_URL}
+    ports:
+      - "${FRONTEND_PORT:-4173}:4173"
+    # .env is the single source of truth — no inline defaults here.
+    env_file: .env
+    environment:
+      # Runtime proxy target for vite preview. Overrides the build-time arg
+      # only for the preview server's own proxy config, not the JS bundle.
+      VITE_BACKEND_URL: ${BACKEND_PUBLIC_URL}
+    restart: unless-stopped

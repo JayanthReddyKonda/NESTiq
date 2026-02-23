@@ -1,0 +1,70 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SpaceForge — Backend stack
+#
+# Services:
+#   backend  — FastAPI API server (Python 3.11, async)
+#   ngrok    — HTTPS tunnel (optional, --profile ngrok)
+#
+# Frontend lives in docker-compose.frontend.yml for portability.
+# Run both:
+#   docker compose -f docker-compose.yml -f docker-compose.frontend.yml up --build
+#
+# Backend only:
+#   docker compose up --build
+#
+# With ngrok:
+#   docker compose --profile ngrok up --build
+#
+# IMPORTANT: Copy .env.example → .env and fill in all required values before running.
+# ─────────────────────────────────────────────────────────────────────────────
+
+volumes:
+  spaceforge_static:
+  spaceforge_db:
+
+services:
+
+  # ── Backend ───────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "${PORT:-8000}:8000"
+    # .env is the single source of truth — no inline defaults here.
+    env_file: .env
+    environment:
+      # Override DATABASE_URL with the absolute volume-backed path.
+      # This is intentional: the .env default is a relative path for local dev
+      # without Docker; inside the container we must use the absolute volume path.
+      DATABASE_URL: sqlite+aiosqlite:////app/data/spaceforge.db
+    volumes:
+      - spaceforge_static:/app/app/static
+      - spaceforge_db:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── ngrok ─────────────────────────────────────────────────────────────────
+  # Set NGROK_AUTHTOKEN and NGROK_DOMAIN in .env.
+  ngrok:
+    image: ngrok/ngrok:latest
+    command:
+      - "http"
+      - "backend:8000"
+      - "--log=stdout"
+      - "--domain=${NGROK_DOMAIN}"
+    env_file: .env
+    ports:
+      - "4040:4040"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles:
+      - ngrok
