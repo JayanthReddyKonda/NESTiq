@@ -1,7 +1,8 @@
 /**
  * Typed API client for SpaceForge backend.
- * Base URL is injected at build time via VITE_BACKEND_URL (falls back to "" which
- * means same-origin, useful when backend serves the frontend directly).
+ * BASE is always empty — requests go to same origin (localhost:4173).
+ * Vite preview proxy forwards /api, /static, /health to the backend container
+ * using VITE_PROXY_TARGET (http://backend:8000 in Docker).
  */
 
 import type {
@@ -11,7 +12,7 @@ import type {
     RoomAnalyzeResponse,
 } from "../types";
 
-const BASE = (import.meta.env.VITE_BACKEND_URL as string | undefined) ?? "";
+const BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await fetch(`${BASE}${path}`, init);

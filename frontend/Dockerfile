@@ -7,10 +7,10 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --prefer-offline
 
-# Backend URL is baked into the JS bundle at build time.
-# Override via docker-compose build arg VITE_BACKEND_URL.
-ARG VITE_BACKEND_URL=http://localhost:8000
-ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
+# Proxy target baked into vite.config.ts at build time.
+# In Docker: http://backend:8000 (container DNS)
+ARG VITE_PROXY_TARGET=http://localhost:8000
+ENV VITE_PROXY_TARGET=$VITE_PROXY_TARGET
 
 COPY . .
 RUN npm run build

@@ -1,28 +1,25 @@
-version: "3.9"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SpaceForge — Backend stack
+# =============================================================================
+# SpaceForge — BACKEND  (backend + ngrok)
 #
-# Services:
-#   backend  — FastAPI API server (Python 3.11, async)
-#   ngrok    — HTTPS tunnel (optional, --profile ngrok)
+# Start:  docker compose up --build
+# +ngrok: docker compose --profile ngrok up --build
 #
-# Frontend lives in docker-compose.frontend.yml for portability.
-# Run both:
-#   docker compose -f docker-compose.yml -f docker-compose.frontend.yml up --build
+# Frontend is completely separate — run from docker-compose.frontend.yml.
+# Both stacks share the "spaceforge_net" external network so the frontend
+# container can reach the backend at http://backend:8000.
 #
-# Backend only:
-#   docker compose up --build
-#
-# With ngrok:
-#   docker compose --profile ngrok up --build
-#
-# IMPORTANT: Copy .env.example → .env and fill in all required values before running.
-# ─────────────────────────────────────────────────────────────────────────────
+# First-time setup:
+#   docker network create spaceforge_net
+#   cp .env.example .env  (fill in values)
+# =============================================================================
 
 volumes:
   spaceforge_static:
   spaceforge_db:
+
+networks:
+  spaceforge_net:
+    external: true   # created once with: docker network create spaceforge_net
 
 services:
 
@@ -42,6 +39,8 @@ services:
     volumes:
       - spaceforge_static:/app/app/static
       - spaceforge_db:/app/data
+    networks:
+      - spaceforge_net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -65,6 +64,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - spaceforge_net
     restart: unless-stopped
     profiles:
       - ngrok
