@@ -248,34 +248,30 @@ class FakeProvider(BaseAIProvider):
         }
 
 
-# ── Grok (xAI) Provider ──────────────────────────────────────────────────────
-# Uses the standard openai SDK pointed at https://api.x.ai/v1
-# Model: grok-3 (vision + text + streaming)
+# ── Groq Provider ─────────────────────────────────────────────────────────────
+# Fast LLaMA / Mixtral inference via https://console.groq.com
+# Vision:  llama-3.2-90b-vision-preview  (room analysis)
+# Text:    llama-3.3-70b-versatile       (design gen, procurement)
 
-class GrokProvider(BaseAIProvider):
+class GroqProvider(BaseAIProvider):
     def __init__(self) -> None:
         try:
-            from openai import AsyncOpenAI
+            from groq import AsyncGroq
         except ImportError as exc:
             raise RuntimeError(
-                "openai package is required for GrokProvider. "
-                "Add 'openai>=1.30.0' to requirements.txt"
+                "groq package is required for GroqProvider. "
+                "Add 'groq>=0.9.0' to requirements.txt"
             ) from exc
 
-        self._client = AsyncOpenAI(
-            api_key=settings.grok_api_key.get_secret_value(),
-            base_url=settings.grok_base_url,   # https://api.x.ai/v1
-        )
-        self._model = settings.grok_model       # grok-3
+        self._client = AsyncGroq(api_key=settings.groq_api_key.get_secret_value())
+        self._model = settings.groq_model               # llama-3.3-70b-versatile
+        self._vision_model = settings.groq_vision_model # llama-3.2-90b-vision-preview
 
-    # ── Analyze ──────────────────────────────────────────────────────────────
+    # ── Analyze room (vision) ─────────────────────────────────────────────────
 
     async def analyze_room(self, image_bytes: bytes, filename: str) -> dict:
-        """
-        Send the room image to Grok vision and return structured analysis.
-        grok-3 accepts base64-encoded images inline.
-        """
-        import base64, json as _json
+        """Send room photo to Groq vision model and return structured JSON analysis."""
+        import base64, json as _json, re
 
         b64 = base64.b64encode(image_bytes).decode()
         mime = "image/jpeg"
@@ -284,81 +280,57 @@ class GrokProvider(BaseAIProvider):
         elif filename.lower().endswith(".webp"):
             mime = "image/webp"
 
-        prompt = (
-            "You are an expert interior designer AI. Analyze this room photograph "
-            "and return ONLY a valid JSON object — no markdown, no explanation — "
-            "with this exact schema:\n"
-            "{\n"
-            '  "room_type": string,\n'
-            '  "dimensions": {"width": number, "height": number, "depth": number},\n'
-            '  "lighting": string,\n'
-            '  "existing_features": [string],\n'
-            '  "style_hints": [string],\n'
-            '  "confidence": number (0.0–1.0)\n'
-            "}\n"
-            "All measurements in metres. Return raw JSON only."
+        system = (
+            "You are an expert interior designer AI. "
+            "Respond ONLY with a valid JSON object — no markdown, no explanation."
+        )
+        user = (
+            "Analyze this room photograph and return JSON with this exact schema:\n"
+            '{"room_type":string,"dimensions":{"width":number,"height":number,"depth":number},'
+            '"lighting":string,"existing_features":[string],"style_hints":[string],"confidence":number}\n'
+            "All measurements in metres. confidence is 0.0–1.0."
         )
 
         response = await self._client.chat.completions.create(
-            model=self._model,
+            model=self._vision_model,
             messages=[
+                {"role": "system", "content": system},
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:{mime};base64,{b64}"},
-                        },
+                        {"type": "text", "text": user},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
                     ],
-                }
+                },
             ],
-            response_format={"type": "json_object"},
-            max_tokens=1024,
-            temperature=0.2,
+            max_tokens=512,
+            temperature=0.1,
         )
 
-        raw = response.choices[0].message.content
-        logger.debug("Grok analyze_room response: %s", raw)
-        return _json.loads(raw)
+        raw = response.choices[0].message.content or ""
+        logger.debug("Groq analyze_room raw: %s", raw)
 
-    # ── Design generation ─────────────────────────────────────────────────────
+        # Extract JSON even if model wraps it in markdown
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        return _json.loads(match.group() if match else raw)
+
+    # ── Generate design (text) ────────────────────────────────────────────────
 
     async def generate_design(self, analysis: dict, style: str, preferences: dict) -> dict:
-        """
-        Ask Grok to generate a full furniture layout for the analysed room.
-        """
+        """Ask Groq to generate a full furniture layout. Uses JSON mode (supported on llama-3.3)."""
         import json as _json
 
         prompt = (
             f"You are an expert interior designer AI.\n"
             f"Room analysis: {_json.dumps(analysis)}\n"
-            f"Style requested: {style}\n"
-            f"User preferences: {_json.dumps(preferences)}\n\n"
-            "Return ONLY a valid JSON object with this exact schema:\n"
-            "{\n"
-            '  "style": string,\n'
-            '  "furniture": [\n'
-            "    {\n"
-            '      "id": string (uuid),\n'
-            '      "name": string,\n'
-            '      "category": string,\n'
-            '      "style": string,\n'
-            '      "color": string (hex),\n'
-            '      "position": {"x": number, "y": number, "z": number},\n'
-            '      "rotation": number,\n'
-            '      "dimensions": {"w": number, "h": number, "d": number},\n'
-            '      "model_url": null,\n'
-            '      "price_usd": number,\n'
-            '      "vendor": string,\n'
-            '      "sku": string\n'
-            "    }\n"
-            "  ],\n"
-            '  "layout_notes": string,\n'
-            '  "color_palette": [string (hex)],\n'
-            '  "estimated_cost_usd": number\n'
-            "}\n"
-            "Return 4–6 furniture items. All dimensions in metres. Return raw JSON only."
+            f"Style: {style}\nUser preferences: {_json.dumps(preferences)}\n\n"
+            "Return ONLY valid JSON with this exact schema:\n"
+            '{"style":string,"furniture":[{"id":string,"name":string,"category":string,'
+            '"style":string,"color":string,"position":{"x":number,"y":number,"z":number},'
+            '"rotation":number,"dimensions":{"w":number,"h":number,"d":number},'
+            '"model_url":null,"price_usd":number,"vendor":string,"sku":string}],'
+            '"layout_notes":string,"color_palette":[string],"estimated_cost_usd":number}\n'
+            "Include 4–6 furniture items. Dimensions in metres."
         )
 
         response = await self._client.chat.completions.create(
@@ -369,49 +341,37 @@ class GrokProvider(BaseAIProvider):
             temperature=0.4,
         )
 
-        raw = response.choices[0].message.content
-        logger.debug("Grok generate_design response: %s", raw)
+        raw = response.choices[0].message.content or ""
+        logger.debug("Groq generate_design raw: %s", raw)
         return _json.loads(raw)
 
-    # ── Render ────────────────────────────────────────────────────────────────
+    # ── Render (delegated to FakeProvider) ───────────────────────────────────
 
     async def render_design(self, design: dict) -> bytes:
-        """
-        Grok is text/vision only — rendering still uses the FakeProvider placeholder.
-        TODO: PRODUCTION — wire Replicate SDXL or Modal GPU for real renders.
-        """
-        logger.info("GrokProvider: render_design delegating to FakeProvider (no image gen)")
+        """Groq has no image generation — delegates to FakeProvider placeholder."""
+        logger.info("GroqProvider: render_design → FakeProvider (no image gen on Groq)")
         return await FakeProvider().render_design(design)
 
-    # ── Procurement stream ────────────────────────────────────────────────────
+    # ── Procurement stream (text + streaming) ─────────────────────────────────
 
     async def procure(self, design: dict, budget: float | None, vendors: list[str]):
-        """
-        Stream Grok's procurement analysis as SSE events.
-        Uses streaming chat completion — each chunk becomes a thought/result event.
-        """
+        """Stream Groq's procurement analysis as SSE events via streaming chat."""
         import json as _json
 
         furniture = design.get("furniture", [])
         budget_str = f"${budget}" if budget else "no fixed budget"
 
         prompt = (
-            f"You are an expert procurement specialist AI.\n"
-            f"Interior design has {len(furniture)} furniture items:\n"
+            f"You are a procurement specialist AI.\n"
+            f"Design has {len(furniture)} furniture items:\n"
             f"{_json.dumps(furniture, indent=2)}\n\n"
-            f"Budget: {budget_str}\n"
-            f"Preferred vendors: {vendors or ['any']}\n\n"
-            "For each item:\n"
-            "1. Search for the best real purchase source\n"
-            "2. Suggest alternatives if over budget\n"
-            "3. Provide a realistic price estimate\n\n"
-            "Stream your reasoning naturally — think out loud, then give results."
+            f"Budget: {budget_str}\nPreferred vendors: {vendors or ['any']}\n\n"
+            "For each item: find the best real purchase source, suggest budget alternatives, "
+            "give realistic price. End with total cost and savings summary."
         )
 
-        # Opening thought event
-        yield {"event": "thought", "data": f"Analysing {len(furniture)} items with budget {budget_str}"}
+        yield {"event": "thought", "data": f"Analysing {len(furniture)} items — budget {budget_str}"}
 
-        # Stream Grok's response
         stream = await self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
@@ -425,10 +385,8 @@ class GrokProvider(BaseAIProvider):
             delta = chunk.choices[0].delta.content or ""
             if delta:
                 buffer += delta
-                # Emit streamed text as thought events
                 yield {"event": "thought", "data": delta}
 
-        # Final summary — compute totals from design data
         total = sum(p.get("price_usd", 0) for p in furniture)
         within_budget = budget is None or total <= budget
         yield {
@@ -437,7 +395,7 @@ class GrokProvider(BaseAIProvider):
                 "total_usd": round(total, 2),
                 "within_budget": within_budget,
                 "items": len(furniture),
-                "grok_analysis": buffer[-500:] if buffer else "",  # last 500 chars
+                "groq_analysis": buffer[-500:] if buffer else "",
             },
         }
 
@@ -446,7 +404,7 @@ class GrokProvider(BaseAIProvider):
 
 _PROVIDERS: dict[str, type[BaseAIProvider]] = {
     "fake": FakeProvider,
-    "grok": GrokProvider,
+    "groq": GroqProvider,
 }
 
 
@@ -455,3 +413,4 @@ def get_ai_provider() -> BaseAIProvider:
     provider_cls = _PROVIDERS.get(settings.ai_provider, FakeProvider)
     logger.info("AI provider: %s", settings.ai_provider)
     return provider_cls()
+

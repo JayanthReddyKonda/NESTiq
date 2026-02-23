@@ -7,5 +7,5 @@ aiosqlite==0.20.0
 python-multipart==0.0.9
 Pillow==10.4.0
 httpx==0.27.0
-# xAI Grok — uses the OpenAI SDK pointed at https://api.x.ai/v1
-openai>=1.30.0
+# Groq — fast LLaMA/Mixtral inference (https://console.groq.com)
+groq>=0.9.0

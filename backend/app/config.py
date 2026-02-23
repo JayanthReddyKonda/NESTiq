@@ -83,23 +83,25 @@ class Settings(BaseSettings):
         return os.path.join(self.static_dir, self.uploads_subdir)
 
     # ── AI Provider ───────────────────────────────────────────────────────────
-    # Options: fake | grok
-    ai_provider: Literal["fake", "grok"] = "fake"
+    # Options: fake | groq
+    # groq = https://console.groq.com (fast LLaMA/Mixtral inference, free tier)
+    ai_provider: Literal["fake", "groq"] = "fake"
 
-    # Grok (xAI) — https://console.x.ai
-    # Uses the OpenAI SDK pointed at https://api.x.ai/v1
-    grok_api_key: SecretStr = SecretStr("")
-    grok_model: str = "grok-3"          # best available as of Feb 2026
-    grok_base_url: str = "https://api.x.ai/v1"
+    # Groq — https://console.groq.com/keys
+    groq_api_key: SecretStr = SecretStr("")
+    # Best text model on Groq (Feb 2026)
+    groq_model: str = "llama-3.3-70b-versatile"
+    # Best vision model on Groq (Feb 2026) — used for room image analysis
+    groq_vision_model: str = "llama-3.2-90b-vision-preview"
 
     # ── Cross-field validation ────────────────────────────────────────────────
     @model_validator(mode="after")
     def validate_provider_credentials(self) -> "Settings":
         """Fail fast at startup if a real AI provider is selected without credentials."""
-        if self.ai_provider == "grok" and not self.grok_api_key.get_secret_value():
+        if self.ai_provider == "groq" and not self.groq_api_key.get_secret_value():
             raise ValueError(
-                "AI_PROVIDER=grok requires GROK_API_KEY to be set. "
-                "Get yours at https://console.x.ai"
+                "AI_PROVIDER=groq requires GROQ_API_KEY to be set. "
+                "Get yours free at https://console.groq.com/keys"
             )
         return self
 
@@ -109,7 +111,7 @@ class Settings(BaseSettings):
         Always use this in startup logs — never model_dump() directly.
         """
         d = self.model_dump()
-        for field in ("secret_key", "grok_api_key"):
+        for field in ("secret_key", "groq_api_key"):
             if field in d:
                 d[field] = "[REDACTED]"
         return d
