@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # Best text model on Groq (Feb 2026)
     groq_model: str = "llama-3.3-70b-versatile"
     # Best vision model on Groq (Feb 2026) — used for room image analysis
-    groq_vision_model: str = "llama-3.2-90b-vision-preview"
+    groq_vision_model: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     # ── Cross-field validation ────────────────────────────────────────────────
     @model_validator(mode="after")
